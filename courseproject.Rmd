@@ -1,0 +1,268 @@
+---
+title: "Practical Machine Learning"
+subtitle: 'Course Project'
+author:
+- name: Sandro Henrique
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+     html_document:
+     theme: material
+     toc: true
+     toc_depth: 3
+     toc_float: true
+     keep_md: true
+     highlight: tango
+---
+
+## Overview
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+The data for this project come from this source: More information is available from the website here: http://groupware.les.inf.puc-rio.br/har. 
+
+The goal of this project is to __predict the manner in which they did the exercise__.
+
+## Load Libraries and Data Download
+
+```{r echo=FALSE}
+library("dplyr")
+library("caret")
+library("ggplot2")
+library("rmdformats")
+library(AppliedPredictiveModeling)
+library(doParallel)
+cl <- makePSOCKcluster(2)
+registerDoParallel(cl)
+set.seed(3344)
+
+```
+```{r, cache = TRUE} 
+
+urlTrain <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+urlTest <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+
+if (!file.exists("./pml-training.csv")) {
+      download.file(urlTrain, destfile = "./pml-training.csv")
+}
+
+if (!file.exists("./pml-testing.csv")) {
+      download.file(urlTest, destfile = "./pml-testing.csv")
+}
+
+DataTrain <- read.csv("./pml-training.csv")
+DataTest <- read.csv("./pml-testing.csv")
+
+```
+
+
+## Exploratory Data Analysis and Data Cleaning
+
+Before start feature preprocessing, let’s observe the descriptive statistics 
+of each column in the training dataset.
+
+```{r, cache = TRUE}
+
+dim(DataTrain)
+dim(DataTest)
+glimpse(DataTrain)
+
+
+```
+
+
+Apparently there are a number of variables without relevant data, either empty 
+or with NA. We will then remove variables with more than 90% of NA content.
+
+
+```{r, cache = TRUE}
+
+CleanDataTrain <- DataTrain[,colMeans(is.na(DataTrain)) < .9]
+
+```
+
+Additionally let's __remove variables with low variance__, once predictors that 
+only have a single unique value (i.e. a “zero-variance predictor”) or have only a 
+handful of unique values that occur with very low frequencies  does not help on 
+get a good prediction and may cause crashes on some models or the fit to be unstable.
+
+```{r echo=FALSE}
+
+NearZeroVar <- nearZeroVar(CleanDataTrain, saveMetrics= FALSE)
+CleanDataTrain <- CleanDataTrain[, -NearZeroVar]
+CleanDataTrain <- CleanDataTrain[,-c(1:7)]
+
+dim(CleanDataTrain)
+
+```
+Some models may benefit from __reducing the level of correlation__ between the 
+predictors.
+
+
+```{r, cache = TRUE}
+
+descrCor <- cor(CleanDataTrain[,1:51])
+highlyCorData <- findCorrelation(descrCor, cutoff = .75)
+CleanDataTrain <- CleanDataTrain[,-highlyCorData]
+
+dim(CleanDataTrain)
+
+```
+
+### Training and Cross Validation Datasets
+
+
+```{r, cache = TRUE}
+
+
+idxTrain <- createDataPartition(y=CleanDataTrain$classe, p=0.7, list=F)
+DtTrain <- CleanDataTrain[idxTrain,]
+DtCV <- CleanDataTrain[-idxTrain,]
+dim(DtTrain)
+dim(DtCV)
+
+```
+
+## Models Tests
+
+Let's use the most probable successful models for __Classification__ : Decision 
+Trees, Support Vector Machine, Gradient Boosted Trees, and  Random Forest. 
+
+```{r, cache = TRUE}
+
+control <- trainControl(method="cv", number=3, verboseIter=F)
+
+```
+
+### CART - Classification And Regression Tree
+
+```{r, cache = TRUE}
+
+CARTMeth <- train(classe ~ ., data=DtTrain, method="rpart", 
+                   trControl = control, tuneLength = 4)
+pred_CART <- predict(CARTMeth, DtCV)
+cmCART <- confusionMatrix(pred_CART, factor(DtCV$classe))
+cmCART$overall[1]
+
+```
+
+### SVN - Support Vector Machine
+
+```{r, cache = TRUE}
+
+SVMMeth <- train(classe ~ ., data=DtTrain, method="svmLinear", 
+                 trControl = control, tuneLength = 4, verbose = F)
+
+
+pred_SVM <- predict(SVMMeth, DtCV)
+
+cmSVM <- confusionMatrix(pred_SVM, factor(DtCV$classe))
+
+cmSVM$overall[1]
+
+```
+
+### GBM - Gradient Boosting Machine
+
+
+```{r, cache = TRUE}
+
+GBMMeth <- train(classe ~ ., data=DtTrain, method="gbm", 
+                 trControl = control, tuneLength = 5, verbose = F)
+
+
+pred_GBM <- predict(GBMMeth, DtCV)
+
+cmGBM <- confusionMatrix(pred_GBM, factor(DtCV$classe))
+
+cmGBM$overall[1]
+
+```
+
+
+### RF - Random Forest
+
+```{r, cache = TRUE}
+
+RFMeth <- train(classe ~ ., data=DtTrain, method="rf", 
+                 trControl = control, tuneLength = 4, verbose = F)
+
+
+pred_RF <- predict(RFMeth, DtCV)
+
+cmRF <- confusionMatrix(pred_RF, factor(DtCV$classe))
+
+cmRF$overall[1]
+
+```
+
+
+## Models Accuracy Evaluation
+
+```{r, cache = TRUE}
+
+cat(sprintf("Decision Trees:           %s\n", cmCART$overall[1]))
+cat(sprintf("Support Vector Machine:   %s\n", cmSVM$overall[1]))
+cat(sprintf("Gradient Boosted Machine: %s\n", cmGBM$overall[1]))
+cat(sprintf("Random Forest:            %s\n", cmRF$overall[1]))
+
+```
+Random Forest presented the best accuracy, around 98.9% and it will be used in our predictions for test dataset.
+
+## Test Prediction
+
+```{r, cache = TRUE}
+
+TestPred <- predict(RFMeth, DataTest)
+TestPred
+
+```
+
+# Appendix
+
+Verify variables density, quantiles, outliers and best methods performance.
+
+
+```{r, cache = TRUE}
+
+transparentTheme(trans = .9)
+featurePlot(x = DtCV[, 1:31], 
+            y = as.factor(DtCV$classe),
+            plot = "density", 
+            scales = list(x = list(relation="free"), 
+                          y = list(relation="free")), 
+            adjust = 1.5, 
+            pch = "|", 
+            layout = c(3, 2), 
+            auto.key = list(columns = 5))
+
+
+```
+```{r, cache = TRUE}
+
+featurePlot(x = DtCV[, 1:31], 
+            y = as.factor(DtCV$classe),
+            plot = "box",
+            type = c("p", "smooth"),
+            scales = list(x = list(relation="free"), 
+                          y = list(relation="free")), 
+            adjust = 1.5, 
+            span = .5,
+            layout = c(4, 2))
+
+
+```
+```{r, cache = TRUE}
+
+plot(RFMeth)
+
+```
+
+```{r, cache = TRUE}
+
+plot(GBMMeth)
+
+
+```

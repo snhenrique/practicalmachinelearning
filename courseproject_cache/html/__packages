@@ -1,0 +1,11 @@
+base
+dplyr
+lattice
+ggplot2
+caret
+Rcpp
+Amelia
+AppliedPredictiveModeling
+foreach
+iterators
+doParallel
